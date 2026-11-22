@@ -4,3 +4,7 @@ __pycache__/
 .ruff_cache/
 output/~$*
 output/dashboard_artifact.html
+.env
+.env.*
+*.pem
+*.key
