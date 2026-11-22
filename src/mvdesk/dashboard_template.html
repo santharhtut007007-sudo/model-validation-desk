@@ -1,0 +1,482 @@
+<title>VaR Model Validation</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap">
+<style>
+/* Layout: a risk-committee pack. Header band with the verdict, KPI strip, then
+   charts and registers in a 12-column grid that collapses to one column on phones. */
+:root {
+  --bg: #f3f5f7;
+  --surface: #ffffff;
+  --ink: #15202b;
+  --muted: #5a6b7b;
+  --line: #dbe2e8;
+  --accent: #1d5c78;
+  --pnl: #93a7b8;
+  --band: #e9eef2;
+  --good: #2b7a4b;  --good-bg: #e3f2e8;
+  --warn: #a8670f;  --warn-bg: #fbf0dc;
+  --bad: #b42318;   --bad-bg: #fbe4e1;
+  --low: #2c5d8a;   --low-bg: #e2ecf6;
+  --m1: #b42318; --m2: #1d5c78; --m3: #7a5ea8; --m4: #2b7a4b;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e151b; --surface: #151f28; --ink: #e4ebf1; --muted: #93a3b2; --line: #26333f;
+    --accent: #6fb3d2; --pnl: #4f6475; --band: #1b2733;
+    --good: #5cc28a; --good-bg: #173326; --warn: #e2a64b; --warn-bg: #3a2c14;
+    --bad: #f07a6e; --bad-bg: #3d1d1a; --low: #7fb0e0; --low-bg: #1a2c3e;
+    --m1: #f07a6e; --m2: #6fb3d2; --m3: #b59ae0; --m4: #5cc28a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e151b; --surface: #151f28; --ink: #e4ebf1; --muted: #93a3b2; --line: #26333f;
+  --accent: #6fb3d2; --pnl: #4f6475; --band: #1b2733;
+  --good: #5cc28a; --good-bg: #173326; --warn: #e2a64b; --warn-bg: #3a2c14;
+  --bad: #f07a6e; --bad-bg: #3d1d1a; --low: #7fb0e0; --low-bg: #1a2c3e;
+  --m1: #f07a6e; --m2: #6fb3d2; --m3: #b59ae0; --m4: #5cc28a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.5 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px;
+}
+.wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 20px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; margin: 0; text-wrap: balance; }
+h1 { font-size: 1.9rem; line-height: 1.15; }
+h2 { font-size: 1.15rem; }
+.eyebrow { font: 500 0.72rem/1.2 var(--f-body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
+.num, td.n, .mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+header.top {
+  display: grid; grid-template-columns: 1fr auto; gap: 16px 24px; align-items: end;
+  padding-block: 28px 20px; border-bottom: 2px solid var(--ink);
+}
+header.top .sub { color: var(--muted); margin-top: 6px; }
+.verdict { text-align: right; display: grid; gap: 6px; justify-items: end; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; border-radius: 3px;
+  padding: 2px 8px; font: 600 0.75rem/1.6 var(--f-body); white-space: nowrap;
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.big { font-size: 0.95rem; padding: 4px 12px; }
+.Green, .Pass, .Satisfactory { color: var(--good); background: var(--good-bg); }
+.Amber, .Yellow, .Medium { color: var(--warn); background: var(--warn-bg); }
+.Red, .High, .Unsatisfactory, .Reject { color: var(--bad); background: var(--bad-bg); }
+.Low { color: var(--low); background: var(--low-bg); }
+
+.kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.kpi { background: var(--surface); padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.kpi .v { font: 500 1.45rem/1.2 var(--f-mono); font-variant-numeric: tabular-nums; }
+.kpi .d { color: var(--muted); font-size: 0.8rem; }
+
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 20px; }
+.panel { background: var(--surface); border: 1px solid var(--line); padding: 16px 18px; min-width: 0; display: grid; gap: 12px; align-content: start; }
+.panel header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; }
+.panel .note { color: var(--muted); font-size: 0.82rem; max-width: 70ch; }
+.s12 { grid-column: span 12; } .s8 { grid-column: span 8; } .s7 { grid-column: span 7; }
+.s6 { grid-column: span 6; } .s5 { grid-column: span 5; } .s4 { grid-column: span 4; }
+
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button {
+  font: 500 0.8rem/1 var(--f-body); color: var(--muted); background: var(--surface);
+  border: 0; border-right: 1px solid var(--line); padding: 7px 11px; cursor: pointer;
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.seg button:hover:not([aria-pressed="true"]) { background: var(--band); color: var(--ink); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+
+.chart { width: 100%; height: 380px; }
+.chart.short { height: 300px; }
+.tbl { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+th { text-align: left; font: 600 0.72rem/1.3 var(--f-body); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--ink); white-space: nowrap; }
+td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.n, th.n { text-align: right; white-space: nowrap; }
+td:first-child { white-space: nowrap; }
+td .d { color: var(--muted); font-size: 0.75rem; }
+.cnt { display: inline-block; min-width: 2.2em; text-align: center; border-radius: 3px; padding: 1px 6px; font-weight: 500; }
+tr.base td { background: var(--band); }
+.finding { display: grid; grid-template-columns: 4px minmax(0, 1fr); gap: 0 14px; padding-block: 12px; border-bottom: 1px solid var(--line); }
+.finding .bar { border-radius: 2px; }
+.finding .bar.High { background: var(--bad); } .finding .bar.Medium { background: var(--warn); } .finding .bar.Low { background: var(--low); }
+.finding .head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.finding h3 { font-size: 1rem; }
+.finding p { margin: 4px 0 0; max-width: 95ch; }
+.finding .rec { color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.8rem; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 6px; }
+.legend i.dot { width: 8px; height: 8px; border-radius: 50%; }
+footer { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 6px; }
+footer p { margin: 0; max-width: 110ch; }
+
+@media (max-width: 1100px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .s8, .s7, .s6, .s5, .s4 { grid-column: span 12; }
+}
+@media (max-width: 560px) {
+  header.top { grid-template-columns: 1fr; }
+  .verdict { justify-items: start; text-align: left; }
+  h1 { font-size: 1.5rem; }
+  .chart { height: 300px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow">Independent model validation · Market risk · SR 11-7 periodic review</div>
+      <h1 id="title">VaR model validation</h1>
+      <div class="sub" id="subtitle"></div>
+    </div>
+    <div class="verdict">
+      <span class="eyebrow">Overall rating</span>
+      <span id="rating" class="pill big"></span>
+      <span class="sub mono" id="asof"></span>
+    </div>
+  </header>
+
+  <section class="kpis" id="kpis" aria-label="Key metrics"></section>
+
+  <div class="grid">
+    <section class="panel s12">
+      <header>
+        <div>
+          <h2>Daily P&amp;L against 1-day VaR (99%)</h2>
+          <div class="note">Hypothetical P&amp;L of the static book. Every red marker is a day when the loss was bigger than the model's VaR forecast. Drag on the chart to zoom; double-click to reset.</div>
+        </div>
+      </header>
+      <div class="controls">
+        <div class="seg" id="modelSeg" role="group" aria-label="Model"></div>
+        <div class="seg" id="rangeSeg" role="group" aria-label="Period"></div>
+      </div>
+      <div class="legend" id="pnlLegend"></div>
+      <div id="pnlChart" class="chart"></div>
+    </section>
+
+    <section class="panel s7">
+      <header>
+        <div>
+          <h2>Basel traffic light</h2>
+          <div class="note">Exceptions in the trailing 250 trading days at 99%. Five or more puts the model in the Yellow zone and raises the capital multiplier; ten or more is Red.</div>
+        </div>
+      </header>
+      <div id="tlChart" class="chart short"></div>
+    </section>
+
+    <section class="panel s5">
+      <header>
+        <div>
+          <h2>Exceptions by year</h2>
+          <div class="note">Count of 99% VaR breaches. About 2.5 a year is expected.</div>
+        </div>
+      </header>
+      <div id="yearChart" class="chart short"></div>
+    </section>
+
+    <section class="panel s12">
+      <header>
+        <div>
+          <h2>Validation scorecard</h2>
+          <div class="note">Kupiec tests the exception rate, Christoffersen tests whether breaches bunch together, Z2 tests expected shortfall. RAG: Green p ≥ 0.05, Amber 0.01–0.05, Red p &lt; 0.01.</div>
+        </div>
+      </header>
+      <div class="tbl"><table id="scoreTbl"></table></div>
+    </section>
+
+    <section class="panel s12">
+      <header>
+        <div>
+          <h2>Findings register</h2>
+          <div class="note">Generated from the test results on every run, so the evidence always matches the numbers above.</div>
+        </div>
+        <div class="seg" id="sevSeg" role="group" aria-label="Severity filter"></div>
+      </header>
+      <div id="findings"></div>
+    </section>
+
+    <section class="panel s7">
+      <header>
+        <div>
+          <h2>Stress windows</h2>
+          <div class="note">Exceptions per model inside each crisis, against the number a correct 99% model would produce. Red is four or more times the expected count.</div>
+        </div>
+      </header>
+      <div class="tbl"><table id="stressTbl"></table></div>
+    </section>
+
+    <section class="panel s5">
+      <header>
+        <div>
+          <h2>Challenger benchmarking</h2>
+          <div class="note">Mean quantile loss at 99% (lower is better) and a Diebold-Mariano test against the model under review.</div>
+        </div>
+      </header>
+      <div class="tbl"><table id="benchTbl"></table></div>
+    </section>
+
+    <section class="panel s6">
+      <header>
+        <div>
+          <h2>Parameter sensitivity</h2>
+          <div class="note">Full-sample exceptions as the look-back window and EWMA decay change. The dashed line is the expected count.</div>
+        </div>
+      </header>
+      <div id="sensChart" class="chart short"></div>
+    </section>
+
+    <section class="panel s6">
+      <header>
+        <div>
+          <h2>Assumption tests</h2>
+          <div class="note">Conceptual soundness: do the returns behave the way each model assumes?</div>
+        </div>
+      </header>
+      <div class="tbl"><table id="assTbl"></table></div>
+    </section>
+
+    <section class="panel s12">
+      <header><h2>Models in scope</h2></header>
+      <div class="tbl"><table id="invTbl"></table></div>
+    </section>
+  </div>
+
+  <footer>
+    <p id="foot"></p>
+    <p>Educational project built on public ETF prices. The portfolio, model ID and owners are hypothetical. Not investment advice.</p>
+  </footer>
+</div>
+
+<!--DATA-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly.min.js"></script>
+<script>
+(async function () {
+  const D = window.MV_DATA || await fetch("dashboard_data.json").then(r => r.json());
+  const $ = id => document.getElementById(id);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const usd = x => (x < 0 ? "−$" : "$") + Math.abs(x).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  const usdM = x => (x < 0 ? "−$" : "$") + (Math.abs(x) / 1e6).toFixed(2) + "m";
+  const p3 = x => x == null ? "–" : x < 0.001 ? "<0.001" : x.toFixed(3);
+  const pct = x => (x * 100).toFixed(1) + "%";
+  const rag = p => p < 0.01 ? "Red" : p < 0.05 ? "Amber" : "Green";
+  const pill = (t, c) => `<span class="pill ${esc(c || t)}">${esc(t)}</span>`;
+  const models = D.models.map(m => m.name);
+  const base = D.meta.model;
+  const mColor = name => css(["--m1", "--m2", "--m3", "--m4"][models.indexOf(name)]);
+
+  // ---------- header + KPIs
+  const w = Object.entries(D.meta.portfolio).map(([k, v]) => `${k} ${Math.round(v * 100)}%`).join(" · ");
+  $("title").textContent = `${base} historical-simulation VaR`;
+  $("subtitle").textContent = `$${D.meta.notional / 1e6}m multi-asset book (${w}). Backtest ${D.meta.start} to ${D.meta.end}, ${D.meta.days.toLocaleString()} trading days.`;
+  const rc = D.meta.rating.startsWith("Unsat") ? "Red" : D.meta.rating === "Satisfactory" ? "Green" : "Amber";
+  $("rating").className = "pill big " + rc;
+  $("rating").textContent = D.meta.rating;
+  $("asof").textContent = "Data as of " + D.meta.asOf;
+  const K = D.kpi;
+  const nHigh = D.findings.filter(f => f.Severity === "High").length;
+  const kpis = [
+    ["1-day VaR 99%", usdM(K.var), "Current forecast, model under review"],
+    ["1-day ES 97.5%", usdM(K.es), "FRTB confidence level"],
+    ["Exceptions, last 250d", `${K.last250} ${pill(K.zone, K.zone)}`, "Basel zone today"],
+    ["Full-sample exceptions", `${K.exc} <span class="d">/ ${Math.round(K.expected)} exp.</span>`, `Kupiec p ${p3(K.kupiec)} · clustering p ${p3(K.ind)}`],
+    ["Open findings", `${D.findings.length} <span class="d">(${nHigh} high)</span>`, "Owner: Market Risk Methodology"],
+  ];
+  $("kpis").innerHTML = kpis.map(([l, v, d]) => `<div class="kpi"><span class="eyebrow">${l}</span><span class="v">${v}</span><span class="d">${d}</span></div>`).join("");
+
+  // ---------- derived series
+  const S = D.series;
+  const exc = {};
+  // exception flags come from Python so the counts match the reports exactly
+  models.forEach(m => { const a = new Array(S.pnl.length).fill(0); S.exc[m].forEach(i => { a[i] = 1; }); exc[m] = a; });
+  const rolling = {};
+  models.forEach(m => {
+    const out = []; let run = 0;
+    exc[m].forEach((h, i) => { run += h; if (i >= 250) run -= exc[m][i - 250]; if (i >= 249) out.push(run); });
+    rolling[m] = out;
+  });
+
+  // ---------- plotly theming
+  const layoutBase = () => ({
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: css("--f-body"), color: css("--muted"), size: 12 },
+    margin: { l: 64, r: 16, t: 8, b: 36 },
+    xaxis: { gridcolor: css("--line"), linecolor: css("--line"), zeroline: false },
+    yaxis: { gridcolor: css("--line"), linecolor: css("--line"), zerolinecolor: css("--line") },
+    hoverlabel: { bgcolor: css("--surface"), bordercolor: css("--line"), font: { color: css("--ink"), family: css("--f-mono") } },
+    showlegend: false,
+  });
+  const cfg = { displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d", "toggleSpikelines"] };
+
+  // ---------- P&L vs VaR
+  let curModel = base, curRange = "All";
+  const ranges = { All: null, ...D.stressWindows };
+  function drawPnl() {
+    const v = S.var[curModel].map(x => -x);
+    const ex = exc[curModel];
+    const xs = [], ys = [], txt = [];
+    ex.forEach((h, i) => { if (h) { xs.push(S.dates[i]); ys.push(S.pnl[i]); txt.push(`${S.dates[i]}<br>P&L ${usd(S.pnl[i] * 1e3)}<br>VaR ${usd(v[i] * 1e3)}<br>Loss / VaR ${(S.pnl[i] / v[i]).toFixed(2)}x`); } });
+    const traces = [
+      { x: S.dates, y: S.pnl, type: "scattergl", mode: "lines", name: "P&L", line: { color: css("--pnl"), width: 1 }, hovertemplate: "%{x}<br>P&L $%{y:,.0f}k<extra></extra>" },
+      { x: S.dates, y: v, type: "scattergl", mode: "lines", name: curModel + " VaR", line: { color: mColor(curModel), width: 1.8 }, hovertemplate: "%{x}<br>VaR $%{y:,.0f}k<extra></extra>" },
+      { x: xs, y: ys, type: "scattergl", mode: "markers", name: "Exception", marker: { color: css("--bad"), size: 6, line: { color: css("--surface"), width: 1 } }, text: txt, hovertemplate: "%{text}<extra>Exception</extra>" },
+    ];
+    const L = layoutBase();
+    L.yaxis.title = { text: "USD thousands", font: { size: 11 } };
+    L.yaxis.tickformat = ",.0f";
+    if (ranges[curRange]) L.xaxis.range = ranges[curRange];
+    L.hovermode = "closest";
+    Plotly.react("pnlChart", traces, L, cfg);
+    const n = ex.reduce((a, b) => a + b, 0);
+    $("pnlLegend").innerHTML = `<span><i style="background:${css("--pnl")}"></i>Daily P&amp;L</span><span><i style="background:${mColor(curModel)}"></i>${esc(curModel)} VaR 99%</span><span><i class="dot" style="background:${css("--bad")}"></i>${n} exceptions (${Math.round(S.pnl.length * 0.01)} expected)</span>`;
+  }
+  function seg(el, items, cur, onPick) {
+    el.innerHTML = items.map(t => `<button type="button" aria-pressed="${t === cur}">${esc(t)}</button>`).join("");
+    el.querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+      el.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
+      onPick(b.textContent);
+    }));
+  }
+  seg($("modelSeg"), models, curModel, t => { curModel = t; drawPnl(); });
+  seg($("rangeSeg"), Object.keys(ranges), curRange, t => { curRange = t; drawPnl(); });
+
+  // ---------- traffic light
+  function drawTL() {
+    const d = S.dates.slice(249);
+    const maxY = Math.max(14, ...models.flatMap(m => rolling[m])) + 1;
+    const traces = models.map(m => ({ x: d, y: rolling[m], type: "scattergl", mode: "lines", name: m, line: { color: mColor(m), width: m === base ? 2.2 : 1.2 }, opacity: m === base ? 1 : 0.75, hovertemplate: `${m}: %{y}<extra></extra>` }));
+    const L = layoutBase();
+    L.showlegend = true;
+    L.legend = { orientation: "h", y: 1.12, x: 0, font: { size: 11 } };
+    L.margin.t = 28;
+    L.yaxis.range = [0, maxY];
+    L.yaxis.dtick = 5;
+    L.hovermode = "x unified";
+    L.shapes = [
+      { type: "rect", xref: "paper", x0: 0, x1: 1, y0: 5, y1: 10, fillcolor: css("--warn-bg"), line: { width: 0 }, layer: "below" },
+      { type: "rect", xref: "paper", x0: 0, x1: 1, y0: 10, y1: maxY, fillcolor: css("--bad-bg"), line: { width: 0 }, layer: "below" },
+    ];
+    L.annotations = [
+      { xref: "paper", x: 1, y: 7.5, text: "Yellow", showarrow: false, xanchor: "right", font: { color: css("--warn"), size: 11 } },
+      { xref: "paper", x: 1, y: (10 + maxY) / 2, text: "Red", showarrow: false, xanchor: "right", font: { color: css("--bad"), size: 11 } },
+    ];
+    Plotly.react("tlChart", traces, L, cfg);
+  }
+
+  // ---------- yearly heatmap
+  function drawYear() {
+    const yrs = D.yearly.map(r => String(r.Year));
+    const z = models.map(m => D.yearly.map(r => r[m]));
+    const L = layoutBase();
+    L.margin = { l: 80, r: 10, t: 8, b: 40 };
+    L.xaxis = { tickangle: -45, type: "category", gridcolor: "rgba(0,0,0,0)", linecolor: css("--line") };
+    L.yaxis = { autorange: "reversed", gridcolor: "rgba(0,0,0,0)", linecolor: css("--line") };
+    Plotly.react("yearChart", [{
+      type: "heatmap", x: yrs, y: models, z, zmin: 0, zmax: 12, xgap: 2, ygap: 2,
+      colorscale: [[0, css("--surface")], [0.2, css("--good-bg")], [0.42, css("--warn-bg")], [0.7, css("--warn")], [1, css("--bad")]],
+      text: z.map(row => row.map(String)), texttemplate: "%{text}", textfont: { family: css("--f-mono"), size: 10, color: css("--ink") },
+      hovertemplate: "%{y}, %{x}: %{z} exceptions<extra></extra>", showscale: false,
+    }], L, cfg);
+  }
+
+  // ---------- sensitivity
+  function drawSens() {
+    const R = D.sensitivity;
+    const exp = R[0].Expected;
+    const labels = R.map(r => (r.Family === "EWMA" ? "EWMA " : "HS ") + r.Setting.replace("Window = ", "").replace(" days", "d").replace("Lambda = ", "λ "));
+    const L = layoutBase();
+    L.margin = { l: 90, r: 16, t: 8, b: 36 };
+    L.yaxis = { autorange: "reversed", gridcolor: "rgba(0,0,0,0)", linecolor: css("--line"), type: "category" };
+    L.xaxis.title = { text: "Exceptions (99%)", font: { size: 11 } };
+    L.shapes = [{ type: "line", x0: exp, x1: exp, yref: "paper", y0: 0, y1: 1, line: { color: css("--ink"), dash: "dash", width: 1.2 } }];
+    L.annotations = [{ x: exp, yref: "paper", y: 1, text: `expected ${exp}`, showarrow: false, yanchor: "bottom", font: { size: 10, color: css("--muted") } }];
+    L.margin.t = 20;
+    Plotly.react("sensChart", [{
+      type: "bar", orientation: "h", y: labels, x: R.map(r => r["Exceptions (99%)"]),
+      marker: { color: R.map(r => css(rag(r["Kupiec p"]) === "Green" ? "--good" : rag(r["Kupiec p"]) === "Amber" ? "--warn" : "--bad")) },
+      customdata: R.map(r => [p3(r["Kupiec p"]), usd(r["Avg VaR 99% ($)"])]),
+      hovertemplate: "%{y}: %{x} exceptions<br>Kupiec p %{customdata[0]}<br>Avg VaR %{customdata[1]}<extra></extra>",
+    }], L, cfg);
+  }
+
+  function drawAll() { drawPnl(); drawTL(); drawYear(); drawSens(); }
+  drawAll();
+  const redraw = () => requestAnimationFrame(drawAll);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
+  new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  // ---------- tables
+  const tbl = (id, head, rows, cls = () => "") => {
+    $(id).innerHTML = `<thead><tr>${head.map(h => `<th class="${h[1] || ""}">${h[0]}</th>`).join("")}</tr></thead><tbody>${rows.map((r, i) => `<tr class="${cls(i)}">${r.map((c, j) => `<td class="${head[j][1] || ""}">${c}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  };
+  tbl("scoreTbl",
+    [["Model"], ["Role"], ["Exceptions", "n"], ["Expected", "n"], ["Rate", "n"], ["Kupiec p", "n"], ["Coverage"], ["Christoffersen p", "n"], ["Clustering"], ["ES Z2", "n"], ["ES zone"], ["Last 250d", "n"], ["Basel zone"], ["Days in Red", "n"], ["VaR today", "n"]],
+    D.summary.map(r => [
+      `<strong>${esc(r.Model)}</strong>`, esc(r.Role), r["Exceptions (99%)"], r["Expected exceptions (99%)"].toFixed(1), (r["Exception rate (99%)"] * 100).toFixed(2) + "%",
+      p3(r["Kupiec p"]), pill(rag(r["Kupiec p"])), p3(r["Christoffersen ind p"]), pill(rag(r["Christoffersen ind p"])),
+      r["ES Z2"].toFixed(2), pill(r["ES Z2 zone"]), r["Last-250d exceptions"], pill(r["Current Basel zone"]), pct(r["Days in Red zone (%)"]), usdM(r["Current VaR 99% ($)"]),
+    ]), i => D.summary[i].Model === base ? "base" : "");
+
+  const periods = [...new Set(D.stress.map(r => r.Period))];
+  tbl("stressTbl",
+    [["Period"], ["Days", "n"], ["Expected", "n"], ...models.map(m => [esc(m), "n"]), ["Worst day", "n"]],
+    periods.map(p => {
+      const rows = D.stress.filter(r => r.Period === p);
+      const first = rows[0];
+      return [`<strong>${esc(p)}</strong><br><span class="d mono">${first.From} → ${first.To}</span>`, first.Days, first.Expected.toFixed(1),
+        ...models.map(m => { const r = rows.find(x => x.Model === m); const ratio = r.Exceptions / Math.max(first.Expected, 0.5);
+          return `<span class="cnt ${ratio >= 4 ? "Red" : ratio >= 2 ? "Amber" : "Green"}">${r.Exceptions}</span>`; }),
+        usdM(first["Worst P&L ($)"])];
+    }));
+
+  const dmKey = Object.keys(D.benchmarking[0]).find(k => k.startsWith("DM stat"));
+  tbl("benchTbl",
+    [["Model"], ["Tick loss (bp)", "n"], ["DM stat", "n"], ["p-value", "n"], ["Verdict"]],
+    D.benchmarking.map(r => [esc(r.Model), r["Mean tick loss (bp)"].toFixed(3), r[dmKey] == null ? "–" : r[dmKey].toFixed(2), p3(r["DM p-value"]),
+      r.Verdict === "Significantly better" ? pill("Better", "Green") : r.Verdict === "Significantly worse" ? pill("Worse", "Red") : esc(r.Verdict)]),
+    i => D.benchmarking[i].Model === base ? "base" : "");
+
+  tbl("assTbl",
+    [["Assumption"], ["Test"], ["Statistic", "n"], ["p-value", "n"], ["Result"]],
+    D.assumptions.map(r => [esc(r.Assumption), esc(r.Test), r.Statistic.toLocaleString("en-US", { maximumFractionDigits: 1 }), p3(r["p-value"]),
+      r.Result === "Rejected" ? pill("Rejected", "Red") : r.Result === "Fat tails" ? pill("Fat tails", "Amber") : pill(r.Result, "Green")]));
+
+  tbl("invTbl", [["Model"], ["Role"], ["Method"], ["Key assumption"]],
+    D.models.map(m => [`<strong>${esc(m.name)}</strong>`, esc(m.role), esc(m.method), esc(m.assumption)]),
+    i => D.models[i].name === base ? "base" : "");
+
+  // ---------- findings
+  let sev = "All";
+  function drawFindings() {
+    const F = D.findings.filter(f => sev === "All" || f.Severity === sev);
+    $("findings").innerHTML = F.map(f => `
+      <article class="finding">
+        <div class="bar ${esc(f.Severity)}"></div>
+        <div>
+          <div class="head"><span class="mono">${esc(f.ID)}</span>${pill(f.Severity)}<span class="eyebrow">${esc(f.Area)}</span><span class="eyebrow">· ${esc(f.Status)}</span></div>
+          <h3>${esc(f.Finding)}</h3>
+          <p>${esc(f.Evidence)}</p>
+          <p class="rec"><strong>Recommendation:</strong> ${esc(f.Recommendation)}</p>
+        </div>
+      </article>`).join("") || `<p class="note">No findings at this severity.</p>`;
+  }
+  const counts = s => D.findings.filter(f => f.Severity === s).length;
+  seg($("sevSeg"), ["All", "High", "Medium", "Low"].map(x => x === "All" ? x : `${x} (${counts(x)})`), "All",
+      t => { sev = t.split(" ")[0]; drawFindings(); });
+  drawFindings();
+
+  $("foot").textContent = `Methods: Kupiec (1995) proportion of failures; Christoffersen (1998) independence and conditional coverage; Basel Committee (1996) traffic light; Acerbi & Szekely (2014) Z2 for expected shortfall; Diebold-Mariano with quantile loss. Forecasts for day t use data up to t−1 only. GARCH models are re-fitted every 21 trading days on a 750-day window.`;
+})();
+</script>
